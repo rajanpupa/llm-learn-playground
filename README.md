@@ -1,36 +1,53 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# LLM Learn — How an LLM is trained
 
-## Getting Started
+An interactive, visual, step-by-step course on how a large language model is trained —
+from raw text to a model that writes. Built as a Next.js app with hand-rolled React + SVG
+visualizations (no chart libraries).
 
-First, run the development server:
+One tiny running example — a 4-line character corpus and a genuinely-trainable 8-dimension
+transformer called **ToyGPT** — is threaded through every lesson so concepts build on each other.
+
+## Run it
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+npm install
+npm run dev        # http://localhost:3000
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Or build a fully-static site (no server needed):
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```bash
+npm run build      # emits to out/
+# open out/index.html directly, or serve it:
+npx serve out
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## The 16 lessons
 
-## Learn More
+1. **Text into Tokens** — split text into characters
+2. **The Vocabulary & Token IDs** — map tokens to one-hot vectors
+3. **Embeddings** — token ids become dense vectors
+4. **Position** — stamp each token with where it lives
+5. **Predict the Next Token** — the core task
+6. **Self-Attention** — Query/Key/Value and attention weights
+7. **Multi-Head Attention** — several lenses in parallel
+8. **The Transformer Block** — attention + MLP + residuals
+9. **Logits & Softmax** — scores become probabilities
+10. **Loss** — cross-entropy measures mistakes
+11. **Gradient Descent** — walking downhill on the loss landscape
+12. **Backpropagation** — the chain rule for every weight
+13. **The Optimizer** — Adam, gradient clipping, LR schedules
+14. **The Training Loop** — watch ToyGPT train live in your browser
+15. **Generating Text** — temperature & top-k sampling
+16. **Recap** — the whole pipeline in one view
 
-To learn more about Next.js, take a look at the following resources:
+## How it's built
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+- `src/lib/corpus.ts` — the running example (corpus, vocabulary, dataset)
+- `src/lib/model.ts` — ToyGPT: forward pass, sampling (real transformer)
+- `src/lib/train.ts` — backprop, AdamW optimizer, training loop
+- `src/components/viz/` — the interactive visualizations
+- `src/components/lessons/` — one content component per lesson
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+The training loop in lesson 14 is a **real** transformer with real backprop and the Adam
+optimizer — it trains in the browser and its loss curve drops live.
