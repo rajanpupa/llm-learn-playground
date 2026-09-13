@@ -605,6 +605,62 @@ input[type="range"] {
   color: var(--text-2);
 }
 
+/* --- Expandable disclosure ("what's happening here?") --------------------- */
+
+.disclosure {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface-2);
+  margin-top: 14px;
+  overflow: hidden;
+}
+.disclosure > summary {
+  list-style: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--text-2);
+  user-select: none;
+}
+.disclosure > summary::-webkit-details-marker {
+  display: none;
+}
+.disclosure > summary::marker {
+  content: "";
+}
+.disclosure .chevron {
+  display: inline-block;
+  transition: transform 0.15s ease;
+  color: var(--text-3);
+  font-size: 0.85rem;
+  line-height: 1;
+}
+.disclosure[open] > summary .chevron {
+  transform: rotate(90deg);
+}
+.disclosure-body {
+  border-top: 1px solid var(--border);
+  padding: 12px 14px 14px;
+  font-size: 0.9rem;
+  color: var(--text-2);
+}
+.disclosure-body p {
+  margin: 0 0 0.6em;
+}
+.disclosure-body p:last-child {
+  margin-bottom: 0;
+}
+.disclosure-body strong {
+  color: var(--text);
+}
+.disclosure-body a {
+  font-weight: 600;
+}
+
 /* --- Misc ----------------------------------------------------------------- */
 
 .hr {

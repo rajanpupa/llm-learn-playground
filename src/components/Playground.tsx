@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   buildVocab,
   buildDatasetFromText,
@@ -19,7 +19,8 @@ import {
   type Params,
   type LossFn,
 } from "@/lib/model";
-import { tokenColor, TokenDot } from "@/components/ui";
+import Link from "next/link";
+import { tokenColor, TokenDot, Callout } from "@/components/ui";
 
 const BLOCK = 8;
 const HEADS = 2;
@@ -34,6 +35,18 @@ function charMap(vocab: Token[]): Map<string, number> {
   const m = new Map<string, number>();
   for (const t of vocab) m.set(t.char, t.id);
   return m;
+}
+
+function Disclosure({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <details className="disclosure">
+      <summary>
+        <span className="chevron">▸</span>
+        <span>{title}</span>
+      </summary>
+      <div className="disclosure-body">{children}</div>
+    </details>
+  );
 }
 
 export default function Playground() {
@@ -330,6 +343,36 @@ export default function Playground() {
           </label>
           <span className="small faint">Each token&apos;s vector has {embedDim} numbers.</span>
         </div>
+
+        <Callout kind="tip" title="Paste any text">
+          <p style={{ margin: 0 }} className="small">
+            Anything goes — code, lyrics, a recipe, another language. The vocabulary, the training
+            windows, and everything the model learns are rebuilt from whatever you type here, so the
+            model adapts to <em>your</em> text.
+          </p>
+        </Callout>
+
+        <Disclosure title="What's happening here?">
+          <p>
+            <strong>Vocabulary &amp; token ids.</strong> Your text is split into unique characters;
+            each one becomes a token with an integer id, numbered in order of first appearance.
+            Spaces and newlines are tokens too.
+          </p>
+          <p>
+            <strong>Sliding windows.</strong> The text is cut into overlapping windows of {BLOCK}{" "}
+            tokens: each window&apos;s <em>input</em> is {BLOCK} tokens and its <em>target</em> is
+            the same window shifted one step right — so the model is always asked &ldquo;given these
+            tokens, predict the next one.&rdquo; Your text currently makes {dsCount} windows.
+          </p>
+          <p>
+            <strong>Randomization?</strong> None. This stage is fully deterministic — the vocabulary
+            and windows are a pure function of the text. No weights, no randomness yet.
+          </p>
+          <p>
+            Details: <Link href="/learn/text-into-tokens">Text into Tokens</Link> ·{" "}
+            <Link href="/learn/vocabulary-token-ids">The Vocabulary &amp; Token IDs</Link>.
+          </p>
+        </Disclosure>
       </div>
 
       {/* 2 · Weights */}
@@ -401,6 +444,36 @@ export default function Playground() {
               </button>
               <input ref={modelFileRef} type="file" accept=".json,application/json" hidden onChange={onModelFile} />
             </div>
+
+            <Disclosure title="What's happening here?">
+              <p>
+                <strong>These are the model&apos;s parameters.</strong> The grid is the
+                token-embedding matrix — one row per token, one number per embedding dimension. Each
+                row is that character&apos;s starting &ldquo;meaning vector.&rdquo;
+              </p>
+              <p>
+                <strong>They start random.</strong> Weights begin as small Gaussian noise (scaled ×
+                0.08). On first load they use a fixed seed (so the demo is reproducible);{" "}
+                <em>Reset all weights</em> re-rolls everything with a fresh random seed, and{" "}
+                <em>Randomize embeddings</em> re-rolls only the token table.
+              </p>
+              <p>
+                <strong>You can edit them.</strong> Click any cell to hand-set a number — training
+                then works from whatever you put here.
+              </p>
+              <p>
+                <strong>Training moves them.</strong> Every step nudges these numbers (and the rest
+                of the network) to lower the loss, so similar characters drift toward similar
+                vectors.
+              </p>
+              <p>
+                <strong>Randomization?</strong> Yes — randomize/reset re-roll weights at random,
+                while the initial fixed-seed state is deterministic. Editing is manual, not random.
+              </p>
+              <p>
+                Details: <Link href="/learn/embeddings">Embeddings: Words as Vectors</Link>.
+              </p>
+            </Disclosure>
           </>
         ) : (
           <p className="small muted">Preparing model…</p>
@@ -504,6 +577,35 @@ export default function Playground() {
               With cross-entropy, the loss starts near <span className="mono">ln({vocab.length}) ≈ {Math.log(vocab.length).toFixed(1)}</span>{" "}
               and falls as the model learns your text.
             </p>
+
+            <Disclosure title="What's happening here?">
+              <p>
+                <strong>One step = forward → loss → backward → update.</strong> The forward pass
+                computes a probability for every possible next token; the loss measures how wrong
+                the guess is; backprop runs the chain rule backward to compute the gradient of the
+                loss with respect to <em>every</em> weight; then Adam nudges each weight to reduce
+                the loss.
+              </p>
+              <p>
+                <strong>The math.</strong> Loss is cross-entropy (default) or mean-squared error.
+                Gradients are averaged over a mini-batch of 4 windows, globally clipped to norm 1.0,
+                then applied with Adam (learning rate 0.02, β₁ = 0.9, β₂ = 0.999) plus weight decay
+                0.01.
+              </p>
+              <p>
+                <strong>Randomization?</strong> No — training is deterministic. Given your text and
+                the current weights, each step&apos;s loss and update are exactly determined (windows
+                are visited in a fixed cyclic order). The only randomness in the playground lives in
+                initialization (step 2) and generation (step 4).
+              </p>
+              <p>
+                Details: <Link href="/learn/loss">Loss</Link> ·{" "}
+                <Link href="/learn/gradient-descent">Gradient Descent</Link> ·{" "}
+                <Link href="/learn/backpropagation">Backpropagation</Link> ·{" "}
+                <Link href="/learn/optimizer">The Optimizer</Link> ·{" "}
+                <Link href="/learn/training-loop">The Training Loop</Link>.
+              </p>
+            </Disclosure>
           </>
         ) : (
           <p className="small muted">Add at least {BLOCK + 1} characters of text to train.</p>
@@ -598,6 +700,33 @@ export default function Playground() {
                 ))}
               </div>
             )}
+
+            <Disclosure title="What's happening here?">
+              <p>
+                <strong>Predict next.</strong> A forward pass runs over your prompt (its last {BLOCK}{" "}
+                tokens), then the final position&apos;s logits are softmax-ed into a probability
+                distribution. The bars show the top 6 likely next characters and their
+                probabilities.
+              </p>
+              <p>
+                <strong>Generate.</strong> Instead of always taking the top choice, it{" "}
+                <em>samples</em> from the distribution, appends the result, and repeats 40 times
+                (autoregressive).
+              </p>
+              <p>
+                <strong>Temperature</strong> reshapes the distribution: low ≈ greedy/confident
+                (almost always the top token), high ≈ flat (more varied, less predictable).
+              </p>
+              <p>
+                <strong>Randomization?</strong> Partly. Prediction (softmax) is deterministic.
+                Generation is random — each sample draws from the distribution with a fresh seed, so
+                runs differ.
+              </p>
+              <p>
+                Details: <Link href="/learn/logits-softmax">Logits &amp; Softmax</Link> ·{" "}
+                <Link href="/learn/generate-text">Generating Text</Link>.
+              </p>
+            </Disclosure>
           </>
         ) : (
           <p className="small muted">Train a little first (add text, then train).</p>
