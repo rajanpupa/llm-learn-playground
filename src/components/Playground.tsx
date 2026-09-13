@@ -2,11 +2,15 @@
 
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
-  buildVocab,
-  buildDatasetFromText,
+  bpeMerges,
+  tokenizeWithRules,
+  buildVocabFromTokens,
+  buildDatasetFromIds,
+  BPE_MERGES,
   CORPUS,
   type ModelConfig,
   type Token,
+  type TokenizerKind,
 } from "@/lib/corpus";
 import { initAdam, trainStep, evalLoss, DEFAULT_TRAIN } from "@/lib/train";
 import {
@@ -52,15 +56,38 @@ function Disclosure({ title, children }: { title: string; children: ReactNode })
 export default function Playground() {
   const [text, setText] = useState(CORPUS);
   const [embedDim, setEmbedDim] = useState(8);
+  const [tokenizer, setTokenizer] = useState<TokenizerKind>("char");
   const [lossFn, setLossFn] = useState<LossFn>("ce");
   const [prompt, setPrompt] = useState("the");
   const [temp, setTemp] = useState(0.7);
   const [stepsInput, setStepsInput] = useState(100);
 
-  const vocab = useMemo(() => buildVocab(text), [text]);
+  const rules = useMemo(
+    () => (tokenizer === "bpe" ? bpeMerges(text, BPE_MERGES) : []),
+    [text, tokenizer],
+  );
+  const tokens = useMemo(
+    () => tokenizeWithRules(text, tokenizer, rules),
+    [text, tokenizer, rules],
+  );
+  const vocab = useMemo(() => buildVocabFromTokens(tokens), [tokens]);
   const cfg = useMemo<ModelConfig>(
     () => ({ vocabSize: vocab.length, embedDim, blockSize: BLOCK, nHead: HEADS }),
     [vocab, embedDim],
+  );
+  const map = useMemo(() => charMap(vocab), [vocab]);
+  const tokenIds = useMemo(
+    () => tokens.map((t) => map.get(t)).filter((x): x is number => x !== undefined),
+    [tokens, map],
+  );
+  const dataset = useMemo(() => buildDatasetFromIds(tokenIds, BLOCK), [tokenIds]);
+  const promptTokens = useMemo(
+    () => tokenizeWithRules(prompt, tokenizer, rules),
+    [prompt, tokenizer, rules],
+  );
+  const promptIds = useMemo(
+    () => promptTokens.map((t) => map.get(t)).filter((x): x is number => x !== undefined),
+    [promptTokens, map],
   );
 
   const paramsRef = useRef<Params | null>(null);
@@ -79,44 +106,41 @@ export default function Playground() {
   const [history, setHistory] = useState<number[]>([]);
   const [version, setVersion] = useState(0);
   const [predictions, setPredictions] = useState<{ id: number; p: number }[]>([]);
-  const [generated, setGenerated] = useState("");
+  const [generatedIds, setGeneratedIds] = useState<number[]>([]);
   const [training, setTraining] = useState(false);
   const [trainProg, setTrainProg] = useState<{ done: number; total: number } | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [restoreTick, setRestoreTick] = useState(0);
 
-  // (Re)initialize (or restore) the model whenever text / vector size changes.
+  // (Re)initialize (or restore) the model whenever text / vector size / tokenizer changes.
   useEffect(() => {
     const restored = restoreRef.current;
     restoreRef.current = null;
     paramsRef.current = restored ?? initParams(cfg, 42);
     adamRef.current = initAdam(cfg);
     stepRef.current = 0;
-    const ds = buildDatasetFromText(text, cfg.blockSize);
-    setLoss(ds.length > 0 ? evalLoss(paramsRef.current, ds, lossFnRef.current) : null);
+    setLoss(dataset.length > 0 ? evalLoss(paramsRef.current, dataset, lossFnRef.current) : null);
     setStep(0);
     setHistory([]);
     setPredictions([]);
-    setGenerated("");
+    setGeneratedIds([]);
     setVersion((v) => v + 1);
-  }, [cfg, text, restoreTick]);
+  }, [cfg, text, tokenizer, dataset, restoreTick]);
 
   const p = paramsRef.current;
   const ready = p != null && p.cfg === cfg;
-  const dsCount = useMemo(() => buildDatasetFromText(text, BLOCK).length, [text]);
-  const map = useMemo(() => charMap(vocab), [vocab]);
+  const dsCount = dataset.length;
 
   const bump = () => setVersion((v) => v + 1);
 
   function recomputeLoss(fn: LossFn = lossFn) {
     if (!ready || !p) return;
-    const ds = buildDatasetFromText(text, BLOCK);
-    setLoss(ds.length > 0 ? evalLoss(p, ds, fn) : null);
+    setLoss(dataset.length > 0 ? evalLoss(p, dataset, fn) : null);
   }
 
   async function runTraining(total: number) {
     if (!ready || !p || !adamRef.current || training) return;
-    const ds = buildDatasetFromText(text, BLOCK);
+    const ds = dataset;
     if (ds.length === 0) return;
     cancelRef.current = false;
     setTraining(true);
@@ -155,7 +179,7 @@ export default function Playground() {
     recomputeLoss();
     setHistory([]);
     setPredictions([]);
-    setGenerated("");
+    setGeneratedIds([]);
     bump();
   }
 
@@ -168,7 +192,7 @@ export default function Playground() {
     recomputeLoss();
     setHistory([]);
     setPredictions([]);
-    setGenerated("");
+    setGeneratedIds([]);
     bump();
   }
 
@@ -190,14 +214,11 @@ export default function Playground() {
 
   function predict() {
     if (!ready || !p) return;
-    const ids = Array.from(prompt)
-      .map((c) => map.get(c))
-      .filter((x): x is number => x !== undefined);
-    if (ids.length === 0) {
+    if (promptIds.length === 0) {
       setPredictions([]);
       return;
     }
-    const ctx = ids.slice(-BLOCK);
+    const ctx = promptIds.slice(-BLOCK);
     const cache = forward(p, ctx);
     const probs = softmaxRow(cache.logits[ctx.length - 1]);
     setPredictions(
@@ -207,18 +228,15 @@ export default function Playground() {
 
   function generateText() {
     if (!ready || !p) return;
-    const ids = Array.from(prompt)
-      .map((c) => map.get(c))
-      .filter((x): x is number => x !== undefined);
-    if (ids.length === 0) return;
-    const seedIds = ids.slice(-BLOCK);
+    if (promptIds.length === 0) return;
+    const seedIds = promptIds.slice(-BLOCK);
     const out = generate(p, seedIds, 40, temp, 0, mulberry32(Date.now() % 100000));
-    setGenerated(out.slice(seedIds.length).map((id) => vocab[id].char).join(""));
+    setGeneratedIds(out.slice(seedIds.length));
   }
 
   function downloadModel() {
     if (!ready || !p) return;
-    const payload = { kind: "toygpt", text, lossFn, step, params: p };
+    const payload = { kind: "toygpt", text, tokenizer, lossFn, step, params: p };
     const blob = new Blob([JSON.stringify(payload)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
@@ -257,6 +275,7 @@ export default function Playground() {
         if (data.text != null) setText(data.text);
         if (data.params.cfg.embedDim) setEmbedDim(data.params.cfg.embedDim);
         if (data.lossFn) setLossFn(data.lossFn);
+        if (data.tokenizer) setTokenizer(data.tokenizer);
         setRestoreTick((t) => t + 1);
         setNotice("Model loaded");
       } catch {
@@ -276,13 +295,43 @@ export default function Playground() {
       .join(" ");
   })();
 
-  const unknownInPrompt = Array.from(prompt).filter((c) => !map.has(c)).length;
+  const unknownInPrompt = promptTokens.length - promptIds.length;
+
+  const tokenizerDesc =
+    tokenizer === "char"
+      ? "each character (spaces and newlines included)"
+      : tokenizer === "word"
+        ? "each whitespace-delimited word"
+        : "subword pieces via byte-pair encoding";
 
   return (
     <div className="stack" style={{ gap: 20 }}>
       {/* 1 · Text */}
       <div className="card card-pad">
         <div className="card-title">1 · Your text</div>
+        <div className="vis-controls" style={{ marginTop: 0 }}>
+          <label>
+            Tokenizer:{" "}
+            <select
+              value={tokenizer}
+              onChange={(e) => setTokenizer(e.target.value as TokenizerKind)}
+              disabled={training}
+              style={{
+                fontFamily: "var(--font-mono)",
+                padding: "6px 8px",
+                borderRadius: 8,
+                border: "1px solid var(--border-strong)",
+                background: "var(--surface)",
+                color: "var(--text)",
+              }}
+            >
+              <option value="char">Character</option>
+              <option value="bpe">Byte-pair encoding (BPE)</option>
+              <option value="word">Word</option>
+            </select>
+          </label>
+          <span className="small faint">How your text is split into tokens.</span>
+        </div>
         <textarea
           value={text}
           onChange={(e) => setText(e.target.value)}
@@ -302,7 +351,7 @@ export default function Playground() {
         />
         <div className="vis-controls">
           <span className="small muted">
-            {vocab.length} unique tokens · {text.length} characters · {dsCount} training windows
+            {vocab.length} unique tokens · {tokens.length} tokens · {dsCount} training windows
           </span>
           <button className="btn btn-ghost btn-sm" onClick={() => textFileRef.current?.click()}>
             Upload text (.txt)
@@ -354,9 +403,9 @@ export default function Playground() {
 
         <Disclosure title="What's happening here?">
           <p>
-            <strong>Vocabulary &amp; token ids.</strong> Your text is split into unique characters;
-            each one becomes a token with an integer id, numbered in order of first appearance.
-            Spaces and newlines are tokens too.
+            <strong>Vocabulary &amp; token ids.</strong> Your text is split into tokens —{" "}
+            {tokenizerDesc}. Each unique token gets an integer id, numbered in order of first
+            appearance.
           </p>
           <p>
             <strong>Sliding windows.</strong> The text is cut into overlapping windows of {BLOCK}{" "}
@@ -449,7 +498,7 @@ export default function Playground() {
               <p>
                 <strong>These are the model&apos;s parameters.</strong> The grid is the
                 token-embedding matrix — one row per token, one number per embedding dimension. Each
-                row is that character&apos;s starting &ldquo;meaning vector.&rdquo;
+                row is that token&apos;s starting &ldquo;meaning vector.&rdquo;
               </p>
               <p>
                 <strong>They start random.</strong> Weights begin as small Gaussian noise (scaled ×
@@ -463,7 +512,7 @@ export default function Playground() {
               </p>
               <p>
                 <strong>Training moves them.</strong> Every step nudges these numbers (and the rest
-                of the network) to lower the loss, so similar characters drift toward similar
+                of the network) to lower the loss, so similar tokens drift toward similar
                 vectors.
               </p>
               <p>
@@ -608,7 +657,7 @@ export default function Playground() {
             </Disclosure>
           </>
         ) : (
-          <p className="small muted">Add at least {BLOCK + 1} characters of text to train.</p>
+          <p className="small muted">Add at least {BLOCK + 1} tokens of text to train.</p>
         )}
       </div>
 
@@ -636,7 +685,7 @@ export default function Playground() {
                 Predict next
               </button>
               <button className="btn btn-ghost" onClick={generateText}>
-                Generate 40 chars
+                Generate 40 tokens
               </button>
               <label className="small">
                 temp
@@ -646,7 +695,7 @@ export default function Playground() {
 
             {unknownInPrompt > 0 && (
               <p className="small" style={{ color: "var(--warn)", marginTop: 8 }}>
-                {unknownInPrompt} character(s) in your prompt aren&apos;t in the vocabulary and were
+                {unknownInPrompt} token(s) in your prompt aren&apos;t in the vocabulary and were
                 skipped.
               </p>
             )}
@@ -655,7 +704,7 @@ export default function Playground() {
               <div className="stack" style={{ gap: 3, marginTop: 12 }}>
                 {predictions.map((r) => (
                   <div key={r.id} className="row" style={{ gap: 8, alignItems: "center" }}>
-                    <span className="mono" style={{ width: 20, color: tokenColor(r.id), fontWeight: 700 }}>
+                    <span className="mono" style={{ minWidth: 24, color: tokenColor(r.id), fontWeight: 700 }}>
                       {vocab[r.id].display}
                     </span>
                     <span style={{ flex: 1, height: 12, background: "var(--surface-3)", borderRadius: 4, overflow: "hidden" }}>
@@ -678,7 +727,7 @@ export default function Playground() {
               </div>
             )}
 
-            {generated && (
+            {generatedIds.length > 0 && (
               <div
                 style={{
                   marginTop: 14,
@@ -693,11 +742,15 @@ export default function Playground() {
                 }}
               >
                 <span style={{ color: "var(--text-3)" }}>{prompt}</span>
-                {generated.split("").map((c, i) => (
-                  <span key={i} style={{ color: tokenColor(map.get(c) ?? 0) }}>
-                    {c === "\n" ? "⏎\n" : c}
-                  </span>
-                ))}
+                {generatedIds.map((id, i) => {
+                  const tok = vocab[id];
+                  return (
+                    <span key={i} style={{ color: tokenColor(id) }}>
+                      {(tokenizer === "word" ? " " : "") +
+                        (tok.char === "\n" ? "⏎\n" : tok.char)}
+                    </span>
+                  );
+                })}
               </div>
             )}
 
@@ -705,7 +758,7 @@ export default function Playground() {
               <p>
                 <strong>Predict next.</strong> A forward pass runs over your prompt (its last {BLOCK}{" "}
                 tokens), then the final position&apos;s logits are softmax-ed into a probability
-                distribution. The bars show the top 6 likely next characters and their
+                distribution. The bars show the top 6 likely next tokens and their
                 probabilities.
               </p>
               <p>
