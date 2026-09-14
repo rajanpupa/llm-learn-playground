@@ -41,6 +41,29 @@ npx serve out
 15. **Generating Text** — temperature & top-k sampling
 16. **Recap** — the whole pipeline in one view
 
+## The Playground
+
+A separate [`/playground`](src/app/playground/page.tsx) page lets you train a tiny model on **your
+own** text — paste anything (code, lyrics, a recipe, another language) and the model adapts to it.
+Four steps:
+
+1. **Text** — paste text or upload a `.txt`; it's split into tokens and turned into sliding-window
+   training examples.
+2. **Weights** — inspect the token-embedding matrix, hand-edit any cell, randomize, reset, or
+   download/upload a trained model as JSON.
+3. **Train** — step through training (1/10/200 steps, or any number) and watch the loss curve drop.
+4. **Predict** — predict the next token, or generate 40 tokens with a temperature slider.
+
+Three **tokenizers** are available (chosen in step 1; everything else adapts):
+
+- **Character** — each character is a token.
+- **Byte-pair encoding (BPE)** — subword pieces learned from your text (16 merge steps).
+- **Word** — each whitespace-delimited word is a token.
+
+Every step has an expandable **"What's happening here?"** section explaining what the step does,
+whether it's randomized or deterministic, how the calculation and backprop work, and links to the
+relevant lesson.
+
 ## How it's built
 
 - `src/lib/corpus.ts` — the running example (corpus, vocabulary, dataset)
